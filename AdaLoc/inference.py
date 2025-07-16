@@ -5,6 +5,7 @@ import argparse
 import numpy as np
 # from localization.detector_utils import find_continuous_intervals
 from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score,precision_score, recall_score, accuracy_score, f1_score
 
 
 
@@ -34,6 +35,8 @@ def run_supervised_experiment_sentence_head(data, cache_dir, DEVICE, pos_bit=0, 
     dataset_preds_list = []
     dataset_gt_list = [] # calculate average precision all together
     invalid_num=0
+    labels_np = []
+    final_predictions = []
 
     for sample in tqdm(data, desc="run evaluation on articles"):
         try:  # For GoodNews, VisualNews, WikiText datasets
@@ -55,10 +58,16 @@ def run_supervised_experiment_sentence_head(data, cache_dir, DEVICE, pos_bit=0, 
 
         test_preds,_,test_preds_single = get_supervised_model_prediction(
             sentence_head_model, tokenizer, test_mixed_sentences, DEVICE=DEVICE, pos_bit=pos_bit, window_size=window_size)# window_size: how many sentences within a window
+        
+        # assert len(test_preds)==len(label), "check label for each article"
+        if len(test_preds)!=len(label):
+            print(f"Skipping index {article_id}")
+            continue
+        print(f'----test_preds----\n{test_preds}')
+        print(f'----label----\n{label}')
         AP = average_precision_score(y_true=np.array(label), y_score=np.array(test_preds))
         # AP_single = average_precision_score(y_true=np.array(label), y_score=np.array(test_preds))
-
-        assert len(test_preds)==len(label), "check label for each article"
+     
         test_preds_list.append(np.array(test_preds))
         test_gt_list.append(np.array(label))
         AP_list.append(AP)
@@ -66,7 +75,25 @@ def run_supervised_experiment_sentence_head(data, cache_dir, DEVICE, pos_bit=0, 
         dataset_preds_list += test_preds
         dataset_gt_list += label
         dataset_single_preds_list += test_preds_single
+        labels_np += label
+        final_predictions += test_preds
 
+    labels_np = np.array(labels_np)
+    final_predictions = np.array(final_predictions)
+    accuracy = accuracy_score(labels_np, final_predictions)
+    macro_f1 = f1_score(labels_np, final_predictions, average='macro')
+    print("Accuracy: {:.1f}".format(accuracy*100))
+    print("Macro F1 Score: {:.1f}".format(macro_f1*100))
+    
+    precision = precision_score(labels_np, final_predictions, average=None)
+    recall = recall_score(labels_np, final_predictions, average=None)
+    print("Precision/Recall per class: ")
+    precision_recall = ' '.join(["{:.1f}/{:.1f}".format(p*100, r*100) for p, r in zip(precision, recall)])
+    print(precision_recall)
+
+    result_add = {"precision":precision, "recall":recall, "accuracy":accuracy, "macro_f1":macro_f1}
+
+    print(result_add)
 
     results = {
         'prediction': dataset_preds_list,
@@ -98,6 +125,7 @@ def get_supervised_model_prediction(model, tokenizer, sentence_list, DEVICE, pos
         preds = []
 
         each_sample_preds = []
+        # print(f'----sentence_list----\n{sentence_list}')
         majority_vote_preds = [[] for i in range(len(sentence_list))]
 
 
@@ -108,9 +136,16 @@ def get_supervised_model_prediction(model, tokenizer, sentence_list, DEVICE, pos
             #                               max_length=ROBERTA_MAX_TEXT_LENGTH, return_tensors="pt").to(DEVICE)
             # prediction_score = model(**window_token_data).logits.softmax(-1)[:, pos_bit].tolist()[0]
             sentence_feature = model.extract_roberta_feature(text_merge)
+            # print(torch.sigmoid(model(sentence_feature)).tolist())
             prediction_score = torch.sigmoid(model(sentence_feature)).tolist()[0]
-
-            each_sample_preds.append(prediction_score[1])
+            pred = []
+            for p in prediction_score:
+                if p > 0.5:
+                    pred.append(1)
+                else:
+                    pred.append(0)      
+            prediction_score = pred
+            each_sample_preds.append(prediction_score[0])
             try:
                 idx=0
                 for vote_idx in range(window_start, window_start+window_size):
@@ -139,7 +174,7 @@ if __name__=="__main__":
                         help='path to goodnews file')
     parser.add_argument('--sentence_head_folder', type=str, default="logs/sentence_head_goodnews", help="prediction head for sentences within a window")
     parser.add_argument('--cache_dir', type=str, default="/projectnb/ivc-ml/zpzhang/checkpoints/transformers_cache")
-    parser.add_argument('--window_size', type=int, default=3)
+    parser.add_argument('--window_size', type=int, default=1)
     parser.add_argument('--article_num', type=int, default=1000) # 2 for debug
     parser.add_argument('--save_folder', type=str, default="results/ablation_study")
     parser.add_argument('--save_name', type=str, default="")
@@ -176,7 +211,7 @@ if __name__=="__main__":
     }
 
     os.makedirs(args.save_folder,exist_ok=True)
-    with open(join(args.save_folder, args.save_name+".json"),"w") as f:
+    with open("result_code.json","w") as f:
         json.dump(AP_results,f,indent=2, default=str)
 
 
