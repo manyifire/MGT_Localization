@@ -1,14 +1,19 @@
+import os
+# 必须在导入torch之前设置CUDA_VISIBLE_DEVICES
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,6,7"
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import argparse
-import os
 import json
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score,precision_score, recall_score, accuracy_score, f1_score
 from dataloaders import Sample_Sentence_from_Article
 from AdaLoc.roberta_adaloc import RobertaSentenceHead
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -28,10 +33,13 @@ def train(epoch):
     for batch_idx, sample in enumerate(train_loader):
         article_id, label, input_sentences = sample['article_id'],sample['label_np'],sample['input_sentences']
         sentence_feature = model.extract_roberta_feature(input_sentences) # (batch_size, 512, 1024)
+        # print(f'----label----\n{label}') # 3列 0与1的tensor
+        # print(f'----sentence---\n{input_sentences}')
         label = label.type(LongTensor)
 
         optimizer.zero_grad()
         output = model(sentence_feature) # (batch_size, sentences_in_window)
+        # print(f'----output----\n{output.shape}') # tensor, 16,3
 
         loss = F.binary_cross_entropy_with_logits(output, label.float())
         loss.backward()
@@ -41,6 +49,8 @@ def train(epoch):
         if batch_idx % args.process_interval == 0:
             labels_np = label.cpu().numpy()
             predictions_np = output.data.cpu().numpy()
+            # print(f'----predictions_np----\n{predictions_np}')
+            # print(f'----labels_np----\n{labels_np}')
             mAP = average_precision_score(y_true=labels_np, y_score=sigmoid(predictions_np))
 
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tAP: {:.6f}'.format(
@@ -64,19 +74,45 @@ def val():
 
             val_loss += BCE_criterion(output, label.float())  # outputs – (N,C); target – (N)
             predicted = output.data
+            print(f'----predicted----\n{predicted}')
             predicted_np = predicted.cpu().numpy()
+            
             label_np = label.cpu().numpy()
+            print(f'----label_np----\n{label_np}')
 
             return_predictions.append(predicted_np)
             return_labels.append(label_np)
 
         predictions_np, labels_np = np.concatenate(return_predictions), np.concatenate(return_labels)
+        final_predictions = (sigmoid(predictions_np)>0.5).astype(int)
 
         mAP = average_precision_score(labels_np, sigmoid(predictions_np))
         val_loss /= len(val_loader)
 
+
+        accuracy = accuracy_score(labels_np, final_predictions)
+        macro_f1 = f1_score(labels_np, final_predictions, average='macro')
+        print("Accuracy: {:.1f}".format(accuracy*100))
+        print("Macro F1 Score: {:.1f}".format(macro_f1*100))
+
+        precision = precision_score(labels_np, final_predictions, average=None)
+        recall = recall_score(labels_np, final_predictions, average=None)
+        print("Precision/Recall per class: ")
+        precision_recall = ' '.join(["{:.1f}/{:.1f}".format(p*100, r*100) for p, r in zip(precision, recall)])
+        print(precision_recall)
+
+        result = {"precision":precision, "recall":recall, "accuracy":accuracy, "macro_f1":macro_f1}
+
         print('\nValidation set: Average loss: {:.4f}, mAP: {:.4f} \n'
               .format(val_loss, mAP))
+        
+        from sklearn.utils.multiclass import unique_labels
+
+        # 在val()函数中，precision计算之后添加：
+        unique_classes = unique_labels(labels_np, final_predictions)
+        print(f"类别顺序: {unique_classes}")
+        print(f"Precision per class: {dict(zip(unique_classes, precision))}")
+
     return labels_np, output.data, val_loss, mAP
 
 def main(args):
@@ -141,7 +177,6 @@ def main(args):
 if __name__=="__main__":
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
     LongTensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, default='adaloc_goodnews', help='model name')
@@ -151,7 +186,7 @@ if __name__=="__main__":
                         help='path to test data file')
     parser.add_argument('--n_train_sample', type=int, default=10000, help="number of training samples")
     parser.add_argument('--n_test_sample', type=int, default=1000, help="number of test samples")
-    parser.add_argument('--sentences_in_window', type=int, default=3, help="number of sentences with in the receptive field")
+    parser.add_argument('--sentences_in_window', type=int, default=2, help="number of sentences with in the receptive field")
     parser.add_argument('--roberta_detector_name', type=str, default="roberta-large-openai-detector", help="sentence feature encoder")
     parser.add_argument('--num_epoch', type=int, default=10, help='number of epochs of training')
     parser.add_argument('--batch_size', type=int, default=16, help='size of the batches') # batch_size: 256
