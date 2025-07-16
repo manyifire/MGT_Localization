@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 import transformers
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 DEVICE=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -31,21 +34,22 @@ class RobertaSentenceHead(nn.Module):
     """Head for sentence-level classification tasks."""
     def __init__(self,
                  hidden_size=1024,
-                 num_labels=3,
+                 num_labels=1,
                  dropout=0.1,
                  roberta_detector_name=None,
-                 cache_dir: str = "/projectnb/ivc-ml/zpzhang/checkpoints/transformers_cache",
+                 cache_dir: str = "checkpoints/transformers_cache",
                  ):
         super().__init__()
         self.dense = nn.Linear(hidden_size, hidden_size)
         self.dropout = nn.Dropout(dropout)
-        self.out_proj = nn.Linear(hidden_size, num_labels)
+        self.out_proj = nn.Linear(hidden_size, 2)
 
         if roberta_detector_name:
             self.roberta_tokenizer = transformers.AutoTokenizer.from_pretrained(roberta_detector_name,cache_dir=cache_dir)
             self.roberta_detector = transformers.AutoModelForSequenceClassification.from_pretrained(
                 roberta_detector_name, cache_dir=cache_dir).to(DEVICE)
             self.roberta_detector.eval()
+            
     def forward(self, features):
         x = features[:, 0, :]  # take <s> token (equiv. to [CLS])
         x = self.dropout(x)
@@ -62,9 +66,12 @@ class RobertaSentenceHead(nn.Module):
                                                              max_length=512,
                                                              return_tensors="pt").to(
             DEVICE)  # (1, text_length), text_length should be smaller than 512
+        #print(f'----sample_manipulated_article_token----\n{sample_manipulated_article_token}')
         sample_manipulated_article_embeddings = self.roberta_detector(**sample_manipulated_article_token,
                                                                  output_hidden_states=True, return_dict=True)
-        last_hidden_state = sample_manipulated_article_embeddings['hidden_states'][-1]  # (1,512,1024)
+        #print(f'----sample_manipulated_article_embeddings----\n{sample_manipulated_article_embeddings}')
+        last_hidden_state = sample_manipulated_article_embeddings['hidden_states'][-1]  # (16,512,1024)
+        # print(f'----last_hidden_state----\n{last_hidden_state.shape}')
         return last_hidden_state
 
 if __name__=="__main__":
