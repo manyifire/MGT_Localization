@@ -14,9 +14,9 @@ DATA_FOLDER=data/Text_Localization/Goodnews
 #   --batch_size=16
 
 python AdaLoc/train.py \
-  --model_name=mixed_code_mixed\
-  --train_file=code_train_mixed.json\
-  --test_file=code_test_mixed.json\
+  --model_name=mixed_code_block\
+  --train_file=code_train_block.json\
+  --test_file=code_test_block.json\
   --roberta_detector_name=roberta-large-openai-detector\
   --num_epoch=2\
   --batch_size=16
