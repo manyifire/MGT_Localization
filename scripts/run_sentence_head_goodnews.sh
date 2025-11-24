@@ -35,7 +35,7 @@ LLM_list=(gpt2-xl EleutherAI_gpt-j-6B EleutherAI_gpt-neo-2.7B EleutherAI_gpt-neo
 #     --save_name=${LLM_name}_sentence_head_seg3
 # done
   python AdaLoc/inference.py\
-    --data_path=code_val.json\
+    --data_path=code_val_block.json\
     --sentence_head_folder=${SENTENCE_HEAD_FOLDER}\
     --article_num=1000\
     --save_folder=${SAVE_FOLDER}\
