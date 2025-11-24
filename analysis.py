@@ -100,4 +100,3 @@ if __name__ == '__main__':
 #                 outfile.write(json.dumps(data) + '\n')
 
 # print(f'Filtered data saved to {output_file}')
-
